@@ -2,13 +2,14 @@
 """
 Class for reading data from from Tucker Davis TTank format.
 Terminology:
-TDT hold data with tanks (actually a directory). And tanks hold sub block
-(sub directories).
-Tanks correspond to neo.Block and tdt block correspond to neo.Segment.
+TDT hold data with tanks (actually a directory). And tanks hold blocks
+(sub directories). These blocks can be segmented if pause is pressed.
 
-Note the name Block is ambiguous because it does not refer to same thing in TDT
-terminology and neo.
+If you feed a tank as dirname into this function then this is the 
+neo.Block and blocks with be read in as neo.Segment.
+If you feed in a TDT block as dirname then this is the neo.Block.
 
+Note that paused blocks (neo.Segment) are not yet parsed by this script.
 
 In a directory there are several files:
   * TSQ timestamp index of data
@@ -56,16 +57,30 @@ class TdtRawIO(BaseRawIO):
 
     def _parse_header(self):
 
-        tankname = os.path.basename(self.dirname)
+        tankname = os.path.basename(os.path.dirname(self.dirname))
 
         segment_names = []
-        for segment_name in os.listdir(self.dirname):
-            path = os.path.join(self.dirname, segment_name)
-            if is_tdtblock(path):
-                segment_names.append(segment_name)
+        if is_tdtblock(self.dirname):
+            for file in os.listdir(self.dirname):
+                if is_tdtfile(file):
+                    self.dirname = os.path.dirname(self.dirname)
+
+                    file = os.path.splitext(file)[0]
+                    fileparts = file.split('_')
+                    tankname = ''.join(fileparts[0])
+                    segment_names.append('_'.join(fileparts[1:]))
+                    break
+        else:
+            for segment_name in os.listdir(self.dirname):
+                path = os.path.join(self.dirname, segment_name)
+                if is_tdtblock(path):
+                    segment_names.append(segment_name)
 
         nb_segment = len(segment_names)
-
+        if nb_segment == 0:
+            print('No segments found')
+            return
+        
         # TBK (channel info)
         info_channel_groups = None
         for seg_index, segment_name in enumerate(segment_names):
@@ -554,4 +569,11 @@ def is_tdtblock(blockpath):
     if file_ext >= tdt_ext:  # if containing all the necessary files
         return True
     else:
+        return False
+
+def is_tdtfile(filename):
+    tdt_ext = {'.tbk', '.tdx', '.tev', '.tsq'}
+    if os.path.splitext(filename)[1].lower() in tdt_ext:
+        return True
+    else: 
         return False
