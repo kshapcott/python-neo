@@ -263,12 +263,20 @@ class TdtRawIO(BaseRawIO):
 
         unit_channels = np.array(unit_channels, dtype=_unit_channel_dtype)
 
-        # signal channels EVTYPE_STRON
+        # event channels EVTYPE_STRON and EVTYPE_SCALAR
         event_channels = []
-        keep = info_channel_groups['TankEvType'] == EVTYPE_STRON
+        keep = (info_channel_groups['TankEvType'] == EVTYPE_STRON) | \
+            (info_channel_groups['TankEvType'] == EVTYPE_STROFF) | \
+            (info_channel_groups['TankEvType'] == EVTYPE_SCALAR)
         for info in info_channel_groups[keep]:
             chan_name = info['StoreName']
-            chan_id = 1
+            if info['TankEvType'] == EVTYPE_STRON:
+                chan_id = 0 # strobe on events
+            elif info['TankEvType'] == EVTYPE_STROFF:
+                chan_id = 1 # strobe off events
+            elif info['TankEvType'] == EVTYPE_SCALAR:
+                chan_id = 2 # scalar events
+
             event_channels.append((chan_name, chan_id, 'event'))
 
         event_channels = np.array(event_channels, dtype=_event_channel_dtype)
@@ -412,8 +420,11 @@ class TdtRawIO(BaseRawIO):
         h = self.header['event_channels'][event_channel_index]
         store_name = h['name'].encode('ascii')
         tsq = self._tsq[seg_index]
-        chan_id = 0
-        mask = self._get_mask(tsq, seg_index, EVTYPE_STRON, store_name, chan_id, None, None, None)
+        if (h['id'] == '0') | (h['id'] == '1'): # strobe
+            chan_id = 0
+        elif h['id'] == '2': # scalar
+            chan_id = 1
+        mask = self._get_mask(tsq, seg_index, None, store_name, chan_id, None, None, None)
         nb_event = np.sum(mask)
         return nb_event
 
@@ -421,12 +432,19 @@ class TdtRawIO(BaseRawIO):
         h = self.header['event_channels'][event_channel_index]
         store_name = h['name'].encode('ascii')
         tsq = self._tsq[seg_index]
-        chan_id = 0
-        mask = self._get_mask(tsq, seg_index, EVTYPE_STRON, store_name, chan_id, None, None, None)
+
+        if (h['id'] == '0') | (h['id'] == '1'): # strobe
+            chan_id = 0
+            event_type = EVTYPE_STRON
+        elif h['id'] == '2': # scalar
+            chan_id = 1
+            event_type = EVTYPE_SCALAR
+
+        mask = self._get_mask(tsq, seg_index, event_type, store_name, chan_id, None, None, None)
 
         timestamps = tsq[mask]['timestamp']
         timestamps -= self._global_t_start
-        labels = tsq[mask]['offset'].astype('U')
+        labels = tsq[mask]['offset'].view(np.float64)
         durations = None
         # TODO if user demand event to epoch
         # with EVTYPE_STROFF=258
