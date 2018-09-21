@@ -141,11 +141,13 @@ class TdtRawIO(BaseRawIO):
             self._tsq = [self._tsq[x] for x in sort_inds]
         self._global_t_start = self._seg_t_starts[0]
 
+        
+
         # signal channels EVTYPE_STREAM
-        signal_channels = []
         self._sigs_data_buf = {seg_index: {} for seg_index in range(nb_segment)}
         self._sigs_index = {seg_index: {} for seg_index in range(nb_segment)}
         self._sig_dtype_by_group = {}  # key = group_id
+        self._sig_frequency_by_group = {}  # key = group_id
         self._sig_sample_per_chunk = {}  # key = group_id
         self._sigs_lengths = {seg_index: {}
                               for seg_index in range(nb_segment)}  # key = seg_index then group_id
@@ -153,22 +155,28 @@ class TdtRawIO(BaseRawIO):
                               for seg_index in range(nb_segment)}  # key = seg_index then group_id
 
         keep = info_channel_groups['TankEvType'] == EVTYPE_STREAM
-        for group_id, info in enumerate(info_channel_groups[keep]):
-            self._sig_sample_per_chunk[group_id] = info['NumPoints']
+        n_chans = sum(info_channel_groups[keep]['NumChan'])
+        signal_channels = np.zeros((n_chans,),dtype=_signal_channel_dtype) # preallocate
 
-            for c in range(info['NumChan']):
-                chan_index = len(signal_channels)
-                chan_id = c + 1  # If several StoreName then chan_id is not unique in TDT!!!!!
+        # loop over segment to get sampling_rate/data_index/data_buffer
+        sampling_rate = None
+        dtype = None
+        for seg_index, segment_name in enumerate(segment_names):
+            chan_index = -1
+            # get data index
+            tsq = self._tsq[seg_index]
+            mask_evtype = ((tsq['evtype'] == EVTYPE_STREAM) | \
+                            (tsq['evtype'] == EVTYPE_RS4) | \
+                            (tsq['evtype'] == EVTYPE_FILE))
+            for group_id, info in enumerate(info_channel_groups[keep]):
+                mask_info = (tsq['evname'] == info['StoreName'])
+                self._sig_sample_per_chunk[group_id] = info['NumPoints']
 
-                # loop over segment to get sampling_rate/data_index/data_buffer
-                sampling_rate = None
-                dtype = None
-                for seg_index, segment_name in enumerate(segment_names):
-                    # get data index
-                    tsq = self._tsq[seg_index]
-                    mask = (tsq['evtype'] == EVTYPE_STREAM) & \
-                           (tsq['evname'] == info['StoreName']) & \
-                           (tsq['channel'] == chan_id)
+                for c in range(info['NumChan']):
+                    chan_index += 1
+                    chan_id = c + 1  # If several StoreName then chan_id is not unique in TDT!!!!!
+                
+                    mask = mask_evtype & mask_info & (tsq['channel'] == chan_id)
                     data_index = tsq[mask].copy()
                     self._sigs_index[seg_index][chan_index] = data_index
 
@@ -186,18 +194,17 @@ class TdtRawIO(BaseRawIO):
                         assert self._sigs_t_start[seg_index][group_id] == t_start
 
                     # sampling_rate and dtype
-                    _sampling_rate = float(data_index['frequency'][0])
-                    _dtype = data_formats[data_index['dataformat'][0]]
-                    if sampling_rate is None:
-                        sampling_rate = _sampling_rate
-                        dtype = _dtype
-                        if group_id not in self._sig_dtype_by_group:
-                            self._sig_dtype_by_group[group_id] = np.dtype(dtype)
-                        else:
-                            assert self._sig_dtype_by_group[group_id] == dtype
+                    sampling_rate = float(data_index['frequency'][0])
+                    dtype = data_formats[data_index['dataformat'][0]]
+
+                    if group_id not in self._sig_dtype_by_group:
+                        self._sig_dtype_by_group[group_id] = np.dtype(dtype)
                     else:
-                        assert sampling_rate == _sampling_rate, 'sampling is changing!!!'
-                        assert dtype == _dtype, 'sampling is changing!!!'
+                        assert self._sig_dtype_by_group[group_id] == dtype, 'data format is changing!!!'
+                    if group_id not in self._sig_frequency_by_group:
+                        self._sig_frequency_by_group[group_id] = sampling_rate
+                    else:
+                        assert self._sig_frequency_by_group[group_id] == sampling_rate, 'sampling is changing!!!'
 
                     # data buffer test if SEV file exists otherwise TEV
                     path = os.path.join(self.dirname, segment_name)
@@ -211,14 +218,14 @@ class TdtRawIO(BaseRawIO):
                     assert data is not None, 'no TEV nor SEV'
                     self._sigs_data_buf[seg_index][chan_index] = data
 
-                chan_name = '{} {}'.format(info['StoreName'], c + 1)
-                sampling_rate = sampling_rate
-                units = 'V'  # WARNING this is not sur at all
-                gain = 1.
-                offset = 0.
-                signal_channels.append((chan_name, chan_id, sampling_rate, dtype,
-                                        units, gain, offset, group_id))
-        signal_channels = np.array(signal_channels, dtype=_signal_channel_dtype)
+                    if seg_index == 0:
+                        chan_name = '{} {}'.format(info['StoreName'], c + 1)
+                        sampling_rate = sampling_rate
+                        units = 'V'  # WARNING this is not sur at all
+                        gain = 1.
+                        offset = 0.
+                        signal_channels[chan_index] = (chan_name, chan_id, sampling_rate, dtype,
+                                                units, gain, offset, group_id)
 
         # unit channels EVTYPE_SNIP
         self.internal_unit_ids = {}
@@ -229,13 +236,14 @@ class TdtRawIO(BaseRawIO):
         tsq = np.hstack(self._tsq)
         # If there is no chance the differet TSQ files will have different units,
         #  then we can do tsq = self._tsq[0]
+        mask_evtype = (tsq['evtype'] == EVTYPE_SNIP)
         for info in info_channel_groups[keep]:
+            mask_info = (tsq['evname'] == info['StoreName'])
             for c in range(info['NumChan']):
                 chan_id = c + 1
-                mask = (tsq['evtype'] == EVTYPE_SNIP) & \
-                       (tsq['evname'] == info['StoreName']) & \
-                       (tsq['channel'] == chan_id)
+                mask = mask_evtype & mask_info & (tsq['channel'] == chan_id)
                 unit_ids = np.unique(tsq[mask]['sortcode'])
+                
                 for unit_id in unit_ids:
                     unit_index = len(unit_channels)
                     self.internal_unit_ids[unit_index] = (info['StoreName'], chan_id, unit_id)
@@ -494,6 +502,8 @@ EVTYPE_STRON = int('00000101', 16)  # 257
 EVTYPE_STROFF = int('00000102', 16)  # 258
 EVTYPE_SCALAR = int('00000201', 16)  # 513
 EVTYPE_STREAM = int('00008101', 16)  # 33025
+EVTYPE_RS4 = int('00008131', 16)  # 33073  RS4 "Phantom Store" (undocumented)
+EVTYPE_FILE = int('00008111', 16) #33041 Unique Channel (seq-) File (undocumented)
 EVTYPE_SNIP = int('00008201', 16)  # 33281
 EVTYPE_MARK = int('00008801', 16)  # 34817
 EVTYPE_HASDATA = int('00008000', 16)  # 32768
