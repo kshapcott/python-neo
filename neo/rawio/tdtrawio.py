@@ -185,13 +185,14 @@ class TdtRawIO(BaseRawIO):
                             (tsq['evtype'] == EVTYPE_FILE))
             for group_id, info in enumerate(info_channel_groups[keep]):
                 mask_info = (tsq['evname'] == info['StoreName'])
+                tsq_channel = tsq['channel'].copy()
                 self._sig_sample_per_chunk[group_id] = info['NumPoints']
 
                 for c in range(info['NumChan']):
                     chan_index += 1
                     chan_id = c + 1  # If several StoreName then chan_id is not unique in TDT!!!!!
                 
-                    mask = mask_evtype & mask_info & (tsq['channel'] == chan_id)
+                    mask = mask_evtype & mask_info & (tsq_channel == chan_id)
                     data_index = tsq[mask].copy()
                     self._sigs_index[seg_index][chan_index] = data_index
 
@@ -254,9 +255,10 @@ class TdtRawIO(BaseRawIO):
         mask_evtype = (tsq['evtype'] == EVTYPE_SNIP)
         for info in info_channel_groups[keep]:
             mask_info = (tsq['evname'] == info['StoreName'])
+            tsq_channel = tsq['channel'].copy()
             for c in range(info['NumChan']):
                 chan_id = c + 1
-                mask = mask_evtype & mask_info & (tsq['channel'] == chan_id)
+                mask = mask_evtype & mask_info & (tsq_channel == chan_id)
                 unit_ids = np.unique(tsq[mask]['sortcode'])
                 
                 for unit_id in unit_ids:
