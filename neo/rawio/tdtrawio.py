@@ -60,10 +60,10 @@ class TdtRawIO(BaseRawIO):
         segment_filebase = []
         if is_tdtblock(self.dirname):
             for file in os.listdir(self.dirname):
-                if is_tdtfile(file):   
+                if is_tdtfile(file):
                     basename = os.path.splitext(file)[0]
-                    segment_filebase.append(os.path.join(self.dirname,basename))
-                    break # until we can figure out what true segments (paused files) look like
+                    segment_filebase.append(os.path.join(self.dirname, basename))
+                    break  # until we can figure out what true segments look like
         else:
             tankname = os.path.basename(self.dirname)
             for segment_name in os.listdir(self.dirname):
@@ -76,7 +76,7 @@ class TdtRawIO(BaseRawIO):
         if nb_segment == 0:
             print('No segments found')
             return
-        
+
         # TBK (channel info)
         info_channel_groups = None
         for seg_index, segment_name in enumerate(segment_filebase):
@@ -125,9 +125,9 @@ class TdtRawIO(BaseRawIO):
             if self.sortname is not '':
                 path = os.path.dirname(tsq_filename)
                 try:
-                    for file in os.listdir(os.path.join(path, 'sort', sortname)):
+                    for file in os.listdir(os.path.join(path, 'sort', self.sortname)):
                         if file.endswith(".SortResult"):
-                            sortresult_filename = os.path.join(path, 'sort', sortname, file)
+                            sortresult_filename = os.path.join(path, 'sort', self.sortname, file)
                             # get new sortcode
                             newsortcode = np.fromfile(sortresult_filename, 'int8')[
                                           1024:]  # first 1024 bytes are header
@@ -150,8 +150,6 @@ class TdtRawIO(BaseRawIO):
             self._tsq = [self._tsq[x] for x in sort_inds]
         self._global_t_start = self._seg_t_starts[0]
 
-        
-
         # signal channels EVTYPE_STREAM
         self._sigs_data_buf = {seg_index: {} for seg_index in range(nb_segment)}
         self._sigs_index = {seg_index: {} for seg_index in range(nb_segment)}
@@ -165,7 +163,7 @@ class TdtRawIO(BaseRawIO):
 
         keep = info_channel_groups['TankEvType'] == EVTYPE_STREAM
         n_chans = sum(info_channel_groups[keep]['NumChan'])
-        signal_channels = np.zeros((n_chans,),dtype=_signal_channel_dtype) # preallocate
+        signal_channels = np.zeros((n_chans,), dtype=_signal_channel_dtype)  # preallocate
 
         # loop over segment to get sampling_rate/data_index/data_buffer
         sampling_rate = None
@@ -174,9 +172,9 @@ class TdtRawIO(BaseRawIO):
             chan_index = -1
             # get data index
             tsq = self._tsq[seg_index]
-            mask_evtype = ((tsq['evtype'] == EVTYPE_STREAM) | \
-                            (tsq['evtype'] == EVTYPE_RS4) | \
-                            (tsq['evtype'] == EVTYPE_FILE))
+            mask_evtype = ((tsq['evtype'] == EVTYPE_STREAM) |
+                           (tsq['evtype'] == EVTYPE_RS4) |
+                           (tsq['evtype'] == EVTYPE_FILE))
             for group_id, info in enumerate(info_channel_groups[keep]):
                 mask_info = (tsq['evname'] == info['StoreName'])
                 tsq_channel = tsq['channel'].copy()
@@ -185,7 +183,7 @@ class TdtRawIO(BaseRawIO):
                 for c in range(info['NumChan']):
                     chan_index += 1
                     chan_id = c + 1  # If several StoreName then chan_id is not unique in TDT!!!!!
-                
+
                     mask = mask_evtype & mask_info & (tsq_channel == chan_id)
                     data_index = tsq[mask].copy()
                     self._sigs_index[seg_index][chan_index] = data_index
@@ -217,7 +215,7 @@ class TdtRawIO(BaseRawIO):
                         assert self._sig_frequency_by_group[group_id] == sampling_rate, 'sampling is changing!!!'
 
                     # data buffer test if SEV file exists otherwise TEV
-                    sev_filename = '%s_%s_ch%i.sev'%(segment_name, info['StoreName'].decode('ascii'), chan_id)
+                    sev_filename = '%s_%s_ch%i.sev' % (segment_name, info['StoreName'].decode('ascii'), chan_id)
 
                     if os.path.exists(sev_filename):
                         data = np.memmap(sev_filename, mode='r', offset=0, dtype='uint8')
@@ -233,7 +231,7 @@ class TdtRawIO(BaseRawIO):
                         gain = 1.
                         offset = 0.
                         signal_channels[chan_index] = (chan_name, chan_id, sampling_rate, dtype,
-                                                units, gain, offset, group_id)
+                                                       units, gain, offset, group_id)
 
         # unit channels EVTYPE_SNIP
         self.internal_unit_ids = {}
@@ -252,7 +250,7 @@ class TdtRawIO(BaseRawIO):
                 chan_id = c + 1
                 mask = mask_evtype & mask_info & (tsq_channel == chan_id)
                 unit_ids = np.unique(tsq[mask]['sortcode'])
-                
+
                 for unit_id in unit_ids:
                     unit_index = len(unit_channels)
                     self.internal_unit_ids[unit_index] = (info['StoreName'], chan_id, unit_id)
@@ -280,11 +278,11 @@ class TdtRawIO(BaseRawIO):
         for info in info_channel_groups[keep]:
             chan_name = info['StoreName']
             if info['TankEvType'] == EVTYPE_STRON:
-                chan_id = 0 # strobe on events
+                chan_id = 0  # strobe on events
             elif info['TankEvType'] == EVTYPE_STROFF:
-                chan_id = 1 # strobe off events
+                chan_id = 1  # strobe off events
             elif info['TankEvType'] == EVTYPE_SCALAR:
-                chan_id = 2 # scalar events
+                chan_id = 2  # scalar events
 
             event_channels.append((chan_name, chan_id, 'event'))
 
@@ -429,9 +427,9 @@ class TdtRawIO(BaseRawIO):
         h = self.header['event_channels'][event_channel_index]
         store_name = h['name'].encode('ascii')
         tsq = self._tsq[seg_index]
-        if (h['id'] == '0') | (h['id'] == '1'): # strobe
+        if (h['id'] == '0') | (h['id'] == '1'):  # strobe
             chan_id = 0
-        elif h['id'] == '2': # scalar
+        elif h['id'] == '2':  # scalar
             chan_id = 1
         mask = self._get_mask(tsq, seg_index, None, store_name, chan_id, None, None, None)
         nb_event = np.sum(mask)
@@ -442,10 +440,10 @@ class TdtRawIO(BaseRawIO):
         store_name = h['name'].encode('ascii')
         tsq = self._tsq[seg_index]
 
-        if (h['id'] == '0') | (h['id'] == '1'): # strobe
+        if (h['id'] == '0') | (h['id'] == '1'):  # strobe
             chan_id = 0
             event_type = EVTYPE_STRON
-        elif h['id'] == '2': # scalar
+        elif h['id'] == '2':  # scalar
             chan_id = 1
             event_type = EVTYPE_SCALAR
 
@@ -530,7 +528,7 @@ EVTYPE_STROFF = int('00000102', 16)  # 258
 EVTYPE_SCALAR = int('00000201', 16)  # 513
 EVTYPE_STREAM = int('00008101', 16)  # 33025
 EVTYPE_RS4 = int('00008131', 16)  # 33073  RS4 "Phantom Store" (undocumented)
-EVTYPE_FILE = int('00008111', 16) #33041 Unique Channel (seq-) File (undocumented)
+EVTYPE_FILE = int('00008111', 16)  # 33041 Unique Channel (seq-) File (undocumented)
 EVTYPE_SNIP = int('00008201', 16)  # 33281
 EVTYPE_MARK = int('00008801', 16)  # 34817
 EVTYPE_HASDATA = int('00008000', 16)  # 32768
@@ -565,9 +563,10 @@ def is_tdtblock(blockpath):
     else:
         return False
 
+
 def is_tdtfile(filename):
     tdt_ext = {'.tbk', '.tdx', '.tev', '.tsq'}
     if os.path.splitext(filename)[1].lower() in tdt_ext:
         return True
-    else: 
+    else:
         return False
