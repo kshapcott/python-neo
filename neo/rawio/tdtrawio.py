@@ -57,37 +57,32 @@ class TdtRawIO(BaseRawIO):
 
     def _parse_header(self):
 
-        tankname = os.path.basename(os.path.dirname(self.dirname))
-
-        segment_names = []
+        segment_filebase = []
         if is_tdtblock(self.dirname):
             for file in os.listdir(self.dirname):
-                if is_tdtfile(file):
-                    self.dirname = os.path.dirname(self.dirname)
-
-                    file = os.path.splitext(file)[0]
-                    fileparts = file.split('_')
-                    tankname = ''.join(fileparts[0])
-                    segment_names.append('_'.join(fileparts[1:]))
-                    break
+                if is_tdtfile(file):   
+                    basename = os.path.splitext(file)[0]
+                    segment_filebase.append(os.path.join(self.dirname,basename))
+                    break # until we can figure out what true segments (paused files) look like
         else:
+            tankname = os.path.basename(self.dirname)
             for segment_name in os.listdir(self.dirname):
                 path = os.path.join(self.dirname, segment_name)
                 if is_tdtblock(path):
-                    segment_names.append(segment_name)
+                    filebase = os.path.join(path, tankname + '_' + segment_name)
+                    segment_filebase.append(filebase)
 
-        nb_segment = len(segment_names)
+        nb_segment = len(segment_filebase)
         if nb_segment == 0:
             print('No segments found')
             return
         
         # TBK (channel info)
         info_channel_groups = None
-        for seg_index, segment_name in enumerate(segment_names):
-            path = os.path.join(self.dirname, segment_name)
+        for seg_index, segment_name in enumerate(segment_filebase):
 
             # TBK contain channels
-            tbk_filename = os.path.join(path, tankname + '_' + segment_name + '.Tbk')
+            tbk_filename = segment_name + '.Tbk'
             _info_channel_groups = read_tbk(tbk_filename)
             if info_channel_groups is None:
                 info_channel_groups = _info_channel_groups
@@ -97,9 +92,8 @@ class TdtRawIO(BaseRawIO):
 
         # TEV (mixed data)
         self._tev_datas = []
-        for seg_index, segment_name in enumerate(segment_names):
-            path = os.path.join(self.dirname, segment_name)
-            tev_filename = os.path.join(path, tankname + '_' + segment_name + '.tev')
+        for seg_index, segment_name in enumerate(segment_filebase):
+            tev_filename = segment_name + '.tev'
             if os.path.exists(tev_filename):
                 tev_data = np.memmap(tev_filename, mode='r', offset=0, dtype='uint8')
             else:
@@ -110,9 +104,8 @@ class TdtRawIO(BaseRawIO):
         self._tsq = []
         self._seg_t_starts = []
         self._seg_t_stops = []
-        for seg_index, segment_name in enumerate(segment_names):
-            path = os.path.join(self.dirname, segment_name)
-            tsq_filename = os.path.join(path, tankname + '_' + segment_name + '.tsq')
+        for seg_index, segment_name in enumerate(segment_filebase):
+            tsq_filename = segment_name + '.tsq'
             tsq = np.fromfile(tsq_filename, dtype=tsq_dtype)
             self._tsq.append(tsq)
             # Start and stop times are only found in the second and last header row, respectively.
@@ -130,6 +123,7 @@ class TdtRawIO(BaseRawIO):
             # If there exists an external sortcode in ./sort/[sortname]/*.SortResult
             #  (generated after offline sorting)
             if self.sortname is not '':
+                path = os.path.dirname(tsq_filename)
                 try:
                     for file in os.listdir(os.path.join(path, 'sort', sortname)):
                         if file.endswith(".SortResult"):
@@ -149,7 +143,7 @@ class TdtRawIO(BaseRawIO):
         # Re-order segments according to their start times
         sort_inds = np.argsort(self._seg_t_starts)
         if not np.array_equal(sort_inds, list(range(nb_segment))):
-            segment_names = [segment_names[x] for x in sort_inds]
+            segment_filebase = [segment_filebase[x] for x in sort_inds]
             self._tev_datas = [self._tev_datas[x] for x in sort_inds]
             self._seg_t_starts = [self._seg_t_starts[x] for x in sort_inds]
             self._seg_t_stops = [self._seg_t_stops[x] for x in sort_inds]
@@ -176,7 +170,7 @@ class TdtRawIO(BaseRawIO):
         # loop over segment to get sampling_rate/data_index/data_buffer
         sampling_rate = None
         dtype = None
-        for seg_index, segment_name in enumerate(segment_names):
+        for seg_index, segment_name in enumerate(segment_filebase):
             chan_index = -1
             # get data index
             tsq = self._tsq[seg_index]
@@ -223,10 +217,8 @@ class TdtRawIO(BaseRawIO):
                         assert self._sig_frequency_by_group[group_id] == sampling_rate, 'sampling is changing!!!'
 
                     # data buffer test if SEV file exists otherwise TEV
-                    path = os.path.join(self.dirname, segment_name)
-                    sev_filename = os.path.join(path, tankname + '_' + segment_name + '_' +
-                                                info['StoreName'].decode('ascii') +
-                                                '_ch' + str(chan_id) + '.sev')
+                    sev_filename = '%s_%s_ch%i.sev'%(segment_name, info['StoreName'].decode('ascii'), chan_id)
+
                     if os.path.exists(sev_filename):
                         data = np.memmap(sev_filename, mode='r', offset=0, dtype='uint8')
                     else:
